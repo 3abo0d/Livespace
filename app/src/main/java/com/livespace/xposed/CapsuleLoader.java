@@ -1,30 +1,44 @@
 package com.livespace.xposed;
 
+import com.livespace.shim.Adapters;
 import dalvik.system.DexClassLoader;
 import java.io.File;
 
-/** Loads the 16.1 capsule classes (classes3.dex + classes8.dex of the 16.1 SystemUI) on top of the live SystemUI classloader.
- *  Parent-first: any class that already exists in 16.0.x SystemUI is used from the device, only 16.1-only classes come from the dex. */
+/** Loads capsule.dex (built on the phone by tools/make_capsule_dex.py from the 16.1 SystemUI, patched for 16.0.x).
+ *  Resolution order: live SystemUI classes first, then this module's com.livespace.* classes, then capsule.dex. */
 final class CapsuleLoader {
   static final String DIR = "/data/local/tmp/livespace";
-  static final String[] DEX = { "classes3.dex", "classes8.dex" };
+  static final String DEX = "capsule.dex";
   private static ClassLoader loader;
   private static boolean failed;
 
   static synchronized ClassLoader get(ClassLoader host) {
     if (loader != null) return loader;
     if (failed) return null;
-    StringBuilder path = new StringBuilder();
-    for (String n : DEX) {
-      File f = new File(DIR, n);
-      if (f.canRead()) { if (path.length() > 0) path.append(File.pathSeparator); path.append(f.getAbsolutePath()); }
-      else Log.w("cannot read " + f + " (missing or SELinux denied; run scripts/install_dex.sh)");
+    File f = new File(DIR, DEX);
+    if (!f.canRead()) {
+      Log.w("cannot read " + f + " (missing or SELinux denied; run scripts/build_capsule_dex.sh)");
+      failed = true;
+      return null;
     }
-    if (path.length() == 0) { failed = true; return null; }
     try {
-      loader = new DexClassLoader(path.toString(), null, null, host);
-      Log.i("capsule dex loaded: " + path);
+      Adapters.host = host;
+      loader = new DexClassLoader(f.getAbsolutePath(), null, null, new Bridge(host, CapsuleLoader.class.getClassLoader()));
+      Log.i("capsule dex loaded: " + f + " (" + f.length() + " bytes)");
       return loader;
-    } catch (Throwable t) { failed = true; Log.e("DexClassLoader failed", t); return null; }
+    } catch (Throwable t) {
+      failed = true;
+      Log.e("DexClassLoader failed", t);
+      return null;
+    }
+  }
+
+  private static final class Bridge extends ClassLoader {
+    private final ClassLoader module;
+    Bridge(ClassLoader host, ClassLoader module) { super(host); this.module = module; }
+    @Override protected Class<?> findClass(String name) throws ClassNotFoundException {
+      if (name.startsWith("com.livespace.")) return module.loadClass(name);
+      throw new ClassNotFoundException(name);
+    }
   }
 }

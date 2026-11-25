@@ -19,3 +19,13 @@ Loader + attach + UDFPS anchor + diagnostics. The constructor of the 16.1 contai
 3. Build `CapsuleNotificationDataController`/`LockScreenSeedingInteractor` by hand (replacing Dagger), feed from metis/seedling.
 4. Hide the legacy 16.0.5 capsule view.
 5. Live alerts + media.
+
+## Milestone 0.2: dex patcher (tools/make_capsule_dex.py)
+First on-device log: the 16.1 dex loads and the container constructor runs, then fails with NoSuchMethodError AnimatableProperty.from(...) (16.0.x stripped that static helper; its inner classes are identical).
+A scan of the whole capsule closure (935 classes) found 187 member references to shared classes that do not exist on 16.0.5. The patcher:
+* redirects `AnimatableProperty.from` to `com.livespace.shim.Adapters.animatableFrom` (builds `$5`/`$6` through their constructors),
+* rewrites the new `COUISpringAnimation(Object, FloatPropertyCompat, F)` constructor to the old `(FloatPropertyCompat, Object)` one,
+* copies the 8 R8 `ExternalSyntheticOutline` helper classes that differ between builds to `ls/o/...`,
+* redirects every other missing method/static field to default no-op stubs (`ls/Stubs`), so a missing API can never throw NoSuchMethodError inside SystemUI,
+* leaves 3 references that cannot be redirected: `LockscreenNotificationCenterAnimBreakerExImpl.<init>` (lockscreen shade transition, not on the capsule path), and two `invoke-super` calls to a default method of `TransitionAnimator$Controller` (only hit when launching an app from a capsule).
+Stubs return 0/false/null. Behaviour that depended on those APIs (immersive music wallpaper, AOD transitions, drag springs) is inert for now.
