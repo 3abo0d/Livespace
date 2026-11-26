@@ -50,3 +50,8 @@ Left (cannot be redirected): `LockscreenNotificationCenterAnimBreakerExImpl.<ini
 Log after 0.5: `LinkageError: OplusAnimationFilter.combineFilter overrides final method` (16.1 made `AnimationFilter.combineFilter` non-final).
 New pre-checks: final-method overrides (renamed with a `$ls` suffix so they stop overriding: combineFilter, cancelAnimations, copy, onTransitionAnimationEnd, setBounds), classes extending a class that is final on the device (the 16.1 copy of `BlurDrawable` is relocated and used as the super), static-vs-instance and interface-vs-class call mismatches (stubbed).
 Module: if the real container cannot be built, a visible placeholder pill is attached above the fingerprint area so placement can be checked; the log reports whether a fingerprint view was found.
+
+## Milestone 0.7: crash safety
+Field report after 0.6: the container attached cleanly, but opening the notification shade crashed SystemUI repeatedly (the module was switched off by the user).
+Added: `SafeHost` wraps the container and guards measure/layout/draw/touch/configuration, `CapsuleGuard` swallows capsule-originated exceptions that surface in `Handler.dispatchMessage` and switches the capsule off with the full stack trace in the LSPosed log, the crash-loop guard now trips after 3 SystemUI starts within 15 minutes (the old 60 s reset let a crash a few minutes after attach slip through), and the container is inactive whenever the keyguard is not showing.
+The module sources are now compile-checked with javac against android-33 before every push.

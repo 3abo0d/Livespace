@@ -7,5 +7,6 @@ public abstract class XC_MethodHook {
     public Object getResult() { throw new RuntimeException("stub"); }
     public void setResult(Object o) { throw new RuntimeException("stub"); }
     public Throwable getThrowable() { throw new RuntimeException("stub"); }
+    public void setThrowable(Throwable t) { throw new RuntimeException("stub"); }
   }
 }
