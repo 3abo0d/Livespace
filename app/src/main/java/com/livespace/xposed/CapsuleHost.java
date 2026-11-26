@@ -20,21 +20,32 @@ final class CapsuleHost {
   static final String CONTAINER = "com.oplus.systemui.notification.lockscreen.capsule.NotificationCapsuleContainer";
   static final String TAG = "livespace_capsule";
   private static boolean armed;
+  private static boolean containerFailed;
   private static boolean resAdded;
 
   static void attach(ViewGroup panel, ClassLoader host) {
     try {
       if (panel.findViewWithTag(TAG) != null) return;
       if (!guard(panel.getContext(), panel)) return;
-      ClassLoader cl = CapsuleLoader.get(host);
-      if (cl == null) return;
-      addResources(panel.getContext());
-      Class<?> c = cl.loadClass(CONTAINER);
-      View v = (View) c.getConstructor(Context.class).newInstance(panel.getContext());
-      v.setTag(TAG);
-      panel.addView(v, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
-      UdfpsAnchor.install(panel, v);
-      Log.i("capsule container attached");
+      if (!containerFailed) {
+        try {
+          ClassLoader cl = CapsuleLoader.get(host);
+          if (cl == null) throw new IllegalStateException("capsule.dex not available");
+          addResources(panel.getContext());
+          Class<?> c = cl.loadClass(CONTAINER);
+          View v = (View) c.getConstructor(Context.class).newInstance(panel.getContext());
+          v.setTag(TAG);
+          panel.addView(v, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
+          UdfpsAnchor.install(panel, v);
+          Log.i("capsule container attached");
+          return;
+        } catch (Throwable t) { containerFailed = true; Log.e("attach failed, showing placeholder", t); }
+      }
+      View pill = FallbackPill.create(panel.getContext());
+      pill.setTag(TAG);
+      panel.addView(pill, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
+      UdfpsAnchor.install(panel, pill);
+      Log.i("placeholder pill attached");
     } catch (Throwable t) { Log.e("attach failed", t); }
   }
 

@@ -45,3 +45,8 @@ Log after 0.4: `NoSuchMethodError ViewBlurManager.getCurrentMaterialColor()`. Th
 Largest group: the Oplus expandable-view extension interfaces `OplusExpandableViewEx`/`StateEx` (+Impl, Companion, lambdas): capsule progress, clip width/height, corner radius, blur radio. They are now relocated (16.1 copies under `ls/o/`) like the helper classes, instead of stubbed. Everything else missing (stack animator requests, immersive clock/wallpaper, ViewTransformationHelper custom transformation) is stubbed; `ViewBlurManager.getCurrentMaterialColor` returns a fixed translucent dark colour (0xb8282828) because 16.0.x has no material-colour concept.
 Unknown parents/interfaces that live in a SystemUI library (not in the APK) are only trusted for `on*`/`dump` callbacks.
 Left (cannot be redirected): `LockscreenNotificationCenterAnimBreakerExImpl.<init>`, `ExpandableViewState.mExpandableViewStateEx` (type changed), `KeyguardStyleClockControllerImpl.isEngineImmersive` (instance field). All are off the capsule construction path.
+
+## Milestone 0.6: load-time link errors
+Log after 0.5: `LinkageError: OplusAnimationFilter.combineFilter overrides final method` (16.1 made `AnimationFilter.combineFilter` non-final).
+New pre-checks: final-method overrides (renamed with a `$ls` suffix so they stop overriding: combineFilter, cancelAnimations, copy, onTransitionAnimationEnd, setBounds), classes extending a class that is final on the device (the 16.1 copy of `BlurDrawable` is relocated and used as the super), static-vs-instance and interface-vs-class call mismatches (stubbed).
+Module: if the real container cannot be built, a visible placeholder pill is attached above the fingerprint area so placement can be checked; the log reports whether a fingerprint view was found.

@@ -100,6 +100,23 @@ def inaccessible(T, kind, sig):
     fl = resolve(T, kind, sig)
     return fl is not None and (fl & 5) == 0
 
+def badlink(T, kind, sig, op):
+    # calls the runtime rejects with IncompatibleClassChangeError: static vs instance, interface vs class
+    if kind != 'm': return False
+    fl = resolve(T, 'm', sig)
+    if fl is None: return False
+    static = bool(fl & 8)
+    if op == 'invoke-static' and not static: return True
+    if op in ('invoke-virtual', 'invoke-interface') and static: return True
+    ent = OLD.get(T)
+    if ent:
+        iface = bool(ent['acc'] & 0x200)
+        if op == 'invoke-interface' and not iface: return True
+        if op == 'invoke-virtual' and iface: return True
+    return False
+
+MTH = re.compile(r'^(\.method (?:[a-z-]+ )*)([^\s(]+)(\(.*\)\S+)\s*$')
+
 def split_params(proto):
     ps = proto[1:proto.index(')')]; out = []; i = 0
     while i < len(ps):
@@ -179,6 +196,10 @@ def main():
             pass
         cand = set()
         for t in texts.values(): cand.update(TOK.findall(t))
+        for t in list(texts.values()):  # a capsule class cannot extend a class that is final on this device: use the 16.1 copy
+            m = re.search(r'^\.super (L[^;]+;)', t, re.M)
+            if m and m.group(1) in OLD and (OLD[m.group(1)]['acc'] & 0x10) and m.group(1) not in reloc:
+                reloc.add(m.group(1)); queue.append(m.group(1)); ch = True
         for tk in cand:
             if tk in OLD and tk not in reloc and RELOC_RX.search(tk) and (tk in mism or outer(tk) in reloc):
                 reloc.add(tk); queue.append(tk); ch = True
@@ -219,7 +240,7 @@ def main():
             m = INV.match(line)
             if m:
                 ind, op, rng, regs, T, name, proto = m.groups(); sig = name + proto
-                if T in OLD and (not has(T, 'm', sig) or inaccessible(T, 'm', sig)) and T not in reloc:
+                if T in OLD and (not has(T, 'm', sig) or inaccessible(T, 'm', sig) or badlink(T, 'm', sig, op)) and T not in reloc:
                     kind = op.split('-')[1]
                     if (T, sig) in ADAPT_STATIC and kind == 'static':
                         ret = proto[proto.index(')') + 1:]
@@ -248,6 +269,31 @@ def main():
                     report['UNPATCHED instance field ' + T.split('/')[-1] + '.' + name] += 1
             out.append(line)
         return '\n'.join(out)
+    supmap = {}
+    for c, t in texts.items():
+        m = re.search(r'^\.super (L[^;]+;)', t, re.M)
+        if m: supmap[c] = m.group(1)
+    def final_sigs(me):
+        out = set(); c = supmap.get(me); seen = set()
+        while c and c not in seen:
+            seen.add(c)
+            if c in OLD:
+                for sg, fl in OLD[c]['ma'].items():
+                    if (fl & 0x10) and not (fl & 0xA): out.add(sg)
+                c = OLD[c]['s']
+            else: c = supmap.get(c)
+        return out
+    def fix_overrides(me, t):
+        if supmap.get(me) in OLD and (OLD[supmap[me]]['acc'] & 0x10): report['UNPATCHED extends final class ' + supmap[me].split('/')[-1]] += 1
+        fin = final_sigs(me)
+        if not fin: return t
+        out = []
+        for l in t.split('\n'):
+            m = MTH.match(l)
+            if m and 'static' not in m.group(1) and 'private' not in m.group(1) and not m.group(2).startswith('<') and (m.group(2) + m.group(3)) in fin:
+                l = m.group(1) + m.group(2) + '$ls' + m.group(3); report['renamed final-override ' + m.group(2)] += 1
+            out.append(l)
+        return '\n'.join(out)
     B = os.path.join(W, 'asm'); shutil.rmtree(B, ignore_errors=True); os.makedirs(os.path.join(B, 'smali'))
     def rel(d): return d[1:-1] + '.smali'
     def subst(t):
@@ -255,7 +301,7 @@ def main():
         return t
     for c, t in texts.items():
         p = os.path.join(B, 'smali', ('ls/o/' if c in reloc else '') + rel(c)); os.makedirs(os.path.dirname(p), exist_ok=True)
-        open(p, 'w').write(subst(patch(t)))
+        open(p, 'w').write(subst(patch(fix_overrides(c, t))))
     s = ['.class public ' + STUBS[:-1] + ';', '.super Ljava/lang/Object;', '']
     for (name, ty), dv in sfields.items():
         init = ''

@@ -9,6 +9,7 @@ import java.lang.ref.WeakReference;
 final class UdfpsAnchor {
   private static WeakReference<View> cached;
   private static float last = Float.NaN;
+  private static boolean logged;
 
   static void install(final ViewGroup panel, final View capsule) {
     panel.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
@@ -19,7 +20,9 @@ final class UdfpsAnchor {
   static void apply(ViewGroup panel, View capsule) {
     View fp = cached != null ? cached.get() : null;
     if (fp == null || !fp.isAttachedToWindow()) { fp = find(panel.getRootView()); cached = fp == null ? null : new WeakReference<>(fp); }
-    float lift = 0f;
+    float density = panel.getResources().getDisplayMetrics().density;
+    float lift = 120f * density;  // default when no fingerprint view is found: clear the bottom dock
+    if (!logged) { logged = true; Log.i(fp == null ? "no fingerprint view found, default lift 120dp" : "fingerprint view: " + fp.getClass().getName()); }
     if (fp != null && fp.getHeight() > 0 && fp.isShown()) {
       int[] f = new int[2], p = new int[2];
       fp.getLocationInWindow(f); panel.getLocationInWindow(p);
