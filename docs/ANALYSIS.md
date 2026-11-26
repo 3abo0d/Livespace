@@ -61,3 +61,7 @@ Field report: opening the shade threw `NullPointerException ... NotificationCaps
 Cause (verified in the smali): `NotificationCapsuleContainer.scroller` is only assigned by `NotificationCapsuleContainerControllerImpl` (Dagger-built in 16.1; it also sets capsuleViewModel, containerControllerImpl, lightOSController, stackY listener). Nothing creates that controller here, so the field stays null.
 Interim fix (tools/make_capsule_dex.py `guard_scroller`): the three container methods that use the handler (`onInterceptTouchEvent`, `onTouchEvent`, `checkIfNeedCancelHScroll`) return early when it is null. Two more callers (`CapsuleDataPinHandler.autoScrollToNext`, `CapsuleViewExpandKtKt`) only run once capsules exist.
 Real fix (next): construct `NotificationCapsuleContainerControllerImpl` ourselves (needs CapsuleViewModel, the Lazy providers, OplusNotificationCapsuleInteractorImpl), which also gives touch handling, data binding and stack coupling.
+
+## Milestone 0.9: demo capsule
+Log after 0.8: clean start, `capsule container attached (guarded)`, fingerprint view found (`com.android.keyguard.OplusLockIconView`).
+`DemoCapsule` builds a real `CapsuleItemView` via `CapsuleNotificationData(key, CapsuleNotificationContainerView, color, animAdd)` + `attachCapsuleEntry` + `addContainerView`, with a "Live Space" label, so the capsule is visible before live data exists. Disable with `/data/local/tmp/livespace/nodemo`.

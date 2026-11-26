@@ -40,6 +40,8 @@ final class CapsuleHost {
           panel.addView(safe, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
           UdfpsAnchor.install(panel, safe);
           Log.i("capsule container attached (guarded)");
+          final Context uiCtx = panel.getContext(); final ClassLoader capCl = cl; final View cont = v;
+          safe.post(() -> DemoCapsule.add(uiCtx, capCl, cont));
           return;
         } catch (Throwable t) { containerFailed = true; Log.e("attach failed, showing placeholder", t); }
       }
