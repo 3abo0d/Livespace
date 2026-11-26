@@ -33,3 +33,9 @@ Stubs return 0/false/null. Behaviour that depended on those APIs (immersive musi
 ## Milestone 0.3: resources
 Log after 0.2: capsule.dex loads, then `Resources$NotFoundException 0x7f0702b5` (16.1 resource ids are hard-coded in the dex and do not exist in the 16.0.x resource table).
 Fix: `tools/make_capsule_res.py` copies the 16.1 `resources.arsc` + `res/**` into `capsule_res.apk` with the package id relocated 0x7f -> 0x7e (arsc entries, bag parents/keys and every binary XML attribute/reference/resource-map are rewritten), and `make_capsule_dex.py` rewrites the matching resource-id constants in the dex. The module adds `capsule_res.apk` to SystemUI's AssetManager before building the container, so the capsule sees its real 16.1 dimens/layouts/drawables while SystemUI keeps its own resources.
+
+## Milestone 0.4: enums + access
+Log after 0.3: resources load (`resources added`), then `NoSuchFieldError ViewBlurManager$CardType.CAPSULE`.
+Cause: the scanner trusted the framework `Enum` parent to supply any field, so missing enum constants were never flagged. Fixed. Missing enum constants now map to an existing constant of the same enum (CardType.CAPSULE -> NOTIFICATION, ClockSize.IMMERSED -> LARGE) instead of null.
+New check: capsule.dex is a different classloader than SystemUI, so private/package-private SystemUI members are unreachable (IllegalAccessError). 7 such accesses in 4 members (OplusCustomRow.getContentLayout, TransformState.setTransformationStart{ScaleX,ScaleY}, NotificationStatisticUtil.getNotificationType) are now stubbed. `invoke-super` calls to missing interface defaults are stubbed too.
+Only reference left: `LockscreenNotificationCenterAnimBreakerExImpl.<init>` (shade transition controller, not on the capsule path).

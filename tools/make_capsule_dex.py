@@ -14,6 +14,7 @@ PK = 'Lcom/oplus/systemui/notification/lockscreen/'
 SHIM = 'Lcom/livespace/shim/Adapters;'
 STUBS = 'Lls/Stubs;'
 FIELD_DEFAULTS = {'isNotificationCapsuleMetaBallEnable': 'true', 'USE_OPLUS_PHYSICAL': 'true'}
+ENUM_FALLBACK = {'Lcom/oplus/systemui/notification/blur/ViewBlurManager$CardType;': 'NOTIFICATION'}
 ADAPT_STATIC = {  # (class, name+proto) -> (adapter name, adapter return type or None=same)
  ('Lcom/android/systemui/statusbar/notification/AnimatableProperty;',
   'from(Ljava/lang/String;Ljava/util/function/BiConsumer;Ljava/util/function/Function;III)Lcom/android/systemui/statusbar/notification/AnimatableProperty$6;'): 'animatableFrom'}
@@ -45,7 +46,7 @@ def parse(path, T, members=True):
         c, t, n = struct.unpack_from('<HHI', d, foff + 8 * i); return types[c], string(n) + ':' + types[t]
     for i in range(csz):
         ci, acc, sup, ifo, _, _, cdo, _ = struct.unpack_from('<IIIIIIII', d, coff + 32 * i)
-        e = T.setdefault(types[ci], {'m': set(), 'f': set(), 's': None, 'i': [], 'dex': os.path.basename(path)})
+        e = T.setdefault(types[ci], {'m': set(), 'f': set(), 's': None, 'i': [], 'dex': os.path.basename(path), 'ma': {}, 'fa': {}, 'acc': acc})
         if not members: continue
         e['s'] = types[sup] if sup != 0xffffffff else None
         if ifo: e['i'] = [types[struct.unpack_from('<H', d, ifo + 4 + 2 * k)[0]] for k in range(g(ifo))]
@@ -54,11 +55,11 @@ def parse(path, T, members=True):
             for cnt in (sf, inf):
                 idx = 0
                 for _ in range(cnt):
-                    dl, o = uleb(d, o); _, o = uleb(d, o); idx += dl; e['f'].add(fid(idx)[1])
+                    dl, o = uleb(d, o); af, o = uleb(d, o); idx += dl; sg = fid(idx)[1]; e['f'].add(sg); e['fa'][sg] = af
             for cnt in (dm, vm):
                 idx = 0
                 for _ in range(cnt):
-                    dl, o = uleb(d, o); _, o = uleb(d, o); _, o = uleb(d, o); idx += dl; e['m'].add(mid(idx)[1])
+                    dl, o = uleb(d, o); af, o = uleb(d, o); _, o = uleb(d, o); idx += dl; sg = mid(idx)[1]; e['m'].add(sg); e['ma'][sg] = af
     return d, (g(88), g(80), mid, fid)
 
 def refs_of(path):
@@ -76,8 +77,23 @@ def has(cls, kind, sig, seen=None):
     e = OLD.get(cls)
     if e is None: return True  # framework class, cannot check
     if sig in e[kind]: return True
+    if kind == 'f' and e['s'] == 'Ljava/lang/Enum;': return False  # enum constants live only in the enum itself
     if e['s'] and has(e['s'], kind, sig, seen): return True
     return any(has(i, kind, sig, seen) for i in e['i'])
+
+def resolve(cls, kind, sig, seen=None):
+    seen = seen if seen is not None else set()
+    if cls in seen or cls not in OLD: return None
+    seen.add(cls); e = OLD[cls]
+    if sig in e[kind]: return e['ma' if kind == 'm' else 'fa'].get(sig, 1)
+    for p in ([e['s']] if e['s'] else []) + e['i']:
+        r = resolve(p, kind, sig, seen)
+        if r is not None: return r
+    return None
+def inaccessible(T, kind, sig):
+    # capsule.dex is a different classloader than SystemUI, so private/package-private members of SystemUI classes are unreachable
+    fl = resolve(T, kind, sig)
+    return fl is not None and (fl & 5) == 0
 
 def split_params(proto):
     ps = proto[1:proto.index(')')]; out = []; i = 0
@@ -180,7 +196,7 @@ def main():
             m = INV.match(line)
             if m:
                 ind, op, rng, regs, T, name, proto = m.groups(); sig = name + proto
-                if T in OLD and not has(T, 'm', sig) and T not in reloc:
+                if T in OLD and (not has(T, 'm', sig) or inaccessible(T, 'm', sig)) and T not in reloc:
                     kind = op.split('-')[1]
                     if (T, sig) in ADAPT_STATIC and kind == 'static':
                         ret = proto[proto.index(')') + 1:]
@@ -189,14 +205,21 @@ def main():
                     if (T, sig) in ADAPT_CTOR and not rng:
                         osig, order = ADAPT_CTOR[(T, sig)]; rl = [r.strip() for r in regs.strip('{}').split(',')]
                         out.append('%s%s {%s}, %s->%s' % (ind, op, ', '.join(rl[i] for i in order), T, osig)); report['adapted ctor ' + T.split('/')[-1]] += 1; continue
-                    if name == '<init>' or kind == 'super':
+                    if kind == 'super' and name != '<init>': kind = 'inst'
+                    if name == '<init>':
                         report['UNPATCHED ' + kind + ' ' + T.split('/')[-1] + '.' + name] += 1; out.append(line); continue
                     sname, sproto = stub_for('static' if kind == 'static' else 'inst', T, name, proto)
                     out.append('%sinvoke-static%s %s, %s->%s%s' % (ind, rng or '', regs, STUBS, sname, sproto)); report['stubbed'] += 1; continue
             m = FLD.match(line)
             if m:
                 ind, op, rest, T, name, ty = m.groups()
-                if T in OLD and not has(T, 'f', name + ':' + ty) and T not in reloc:
+                if T in OLD and (not has(T, 'f', name + ':' + ty) or inaccessible(T, 'f', name + ':' + ty)) and T not in reloc:
+                    eo = OLD[T]
+                    if op.startswith('sget') and eo['s'] == 'Ljava/lang/Enum;' and ty == T:  # missing enum constant -> closest existing one
+                        consts = sorted(f.split(':')[0] for f in eo['f'] if f.endswith(':' + T) and not f.startswith('$'))
+                        if consts:
+                            pick = 'NOTIFICATION' if 'NOTIFICATION' in consts else consts[0]
+                            out.append('%s%s %s, %s->%s:%s' % (ind, op, rest, T, pick, ty)); report['enum constant %s.%s -> %s' % (T.split('/')[-1], name, pick)] += 1; continue
                     if op.startswith('s'):
                         sfields[(name, ty)] = FIELD_DEFAULTS.get(name); out.append('%s%s %s, %s->%s:%s' % (ind, op, rest, STUBS, name, ty)); report['stub field'] += 1; continue
                     report['UNPATCHED instance field ' + T.split('/')[-1] + '.' + name] += 1
@@ -234,9 +257,9 @@ def main():
     # verification: every member reference inside the produced dex that points at a device class must resolve
     ms, fs = refs_of(a.out); bad = collections.Counter()
     for T, sig in ms:
-        if T in OLD and not has(T, 'm', sig): bad[T.split('/')[-1] + '.' + sig.split('(')[0]] += 1
+        if T in OLD and (not has(T, 'm', sig) or inaccessible(T, 'm', sig)): bad[T.split('/')[-1] + '.' + sig.split('(')[0]] += 1
     for T, sig in fs:
-        if T in OLD and not has(T, 'f', sig): bad['field ' + T.split('/')[-1] + '.' + sig] += 1
+        if T in OLD and (not has(T, 'f', sig) or inaccessible(T, 'f', sig)): bad['field ' + T.split('/')[-1] + '.' + sig] += 1
     log('building relocated resources apk ...'); st = make_capsule_res.build_res_apk(a.new, a.res_out)
     log('  ', a.res_out, os.path.getsize(a.res_out), 'bytes;', st)
     log('wrote', a.out, os.path.getsize(a.out), 'bytes; unresolved references left:', len(bad))
