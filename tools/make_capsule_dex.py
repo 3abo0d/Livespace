@@ -115,6 +115,29 @@ def badlink(T, kind, sig, op):
         if op == 'invoke-virtual' and iface: return True
     return False
 
+GUARDS = collections.Counter()
+CONT = 'Lcom/oplus/systemui/notification/lockscreen/capsule/NotificationCapsuleContainer;'
+TH = 'Lcom/oplus/systemui/notification/lockscreen/capsule/NotificationCapsuleContainerTouchHandler;'
+OPC = re.compile(r'^\s+(?:invoke-|const|iget|iput|sget|sput|if-|goto|move|return|new-|check-cast|instance-of|aget|aput|add-|sub-|mul-|div-|rem-|and-|or-|xor-|shl-|shr-|ushr-|neg-|not-|cmp|fill-|array-|throw|monitor|nop)|^\s+:[A-Za-z0-9_]+\s*$')
+
+def guard_scroller(c, t):
+    """In 16.1 the container's touch handler ('scroller') is set by a Dagger-built controller that does not exist here.
+    Methods that use it return early instead of throwing NullPointerException."""
+    if c != CONT: return t
+    def fix(m):
+        head, body = m.group(1), m.group(2)
+        if '->getScroller()' not in body or 'getScroller(' in head or 'setScroller(' in head: return m.group(0)
+        ret = head.rsplit(')', 1)[1].strip()
+        dflt = '    return-void' if ret == 'V' else ('    const/4 v0, 0x0\n    return v0' if ret in 'ZBSCIF' else '    const/4 v0, 0x0\n    return-object v0')
+        guard = ['    invoke-virtual {p0}, %s->getScroller()%s' % (CONT, TH), '    move-result-object v0', '    if-nez v0, :ls_scroller_ok', dflt, '    :ls_scroller_ok']
+        out = []; done = False
+        for l in body.split('\n'):
+            if not done and OPC.match(l): out += guard; done = True
+            out.append(l)
+        GUARDS['guarded scroller use in ' + head.split('(')[0].split()[-1]] += 1
+        return '.method ' + head + '\n' + '\n'.join(out) + '.end method'
+    return re.sub(r'^\.method ([^\n]*)\n(.*?)\.end method', fix, t, flags=re.M | re.S)
+
 MTH = re.compile(r'^(\.method (?:[a-z-]+ )*)([^\s(]+)(\(.*\)\S+)\s*$')
 
 def split_params(proto):
@@ -301,7 +324,7 @@ def main():
         return t
     for c, t in texts.items():
         p = os.path.join(B, 'smali', ('ls/o/' if c in reloc else '') + rel(c)); os.makedirs(os.path.dirname(p), exist_ok=True)
-        open(p, 'w').write(subst(patch(fix_overrides(c, t))))
+        open(p, 'w').write(subst(patch(guard_scroller(c, fix_overrides(c, t)))))
     s = ['.class public ' + STUBS[:-1] + ';', '.super Ljava/lang/Object;', '']
     for (name, ty), dv in sfields.items():
         init = ''
@@ -313,6 +336,7 @@ def main():
         if (T, name.split('(')[0]) in STUB_CONST and ret == 'I': body = '    const v0, %s\n    return v0' % STUB_CONST[(T, name.split('(')[0])]
         s += ['', '.method public static %s%s' % (sn, sproto), '    .locals 2', body, '.end method']
     p = os.path.join(B, 'smali', 'ls', 'Stubs.smali'); os.makedirs(os.path.dirname(p), exist_ok=True); open(p, 'w').write('\n'.join(s) + '\n')
+    report.update(GUARDS)
     log('patch report:'); [log('  ', k, v) for k, v in sorted(report.items())]
     # assemble with apktool: reuse an apktool.yml + manifest from any decoded dir
     src = next(os.path.join(W, d) for d in os.listdir(W) if d.startswith('dec_') and os.path.exists(os.path.join(W, d, 'apktool.yml')))

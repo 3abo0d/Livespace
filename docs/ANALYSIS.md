@@ -55,3 +55,9 @@ Module: if the real container cannot be built, a visible placeholder pill is att
 Field report after 0.6: the container attached cleanly, but opening the notification shade crashed SystemUI repeatedly (the module was switched off by the user).
 Added: `SafeHost` wraps the container and guards measure/layout/draw/touch/configuration, `CapsuleGuard` swallows capsule-originated exceptions that surface in `Handler.dispatchMessage` and switches the capsule off with the full stack trace in the LSPosed log, the crash-loop guard now trips after 3 SystemUI starts within 15 minutes (the old 60 s reset let a crash a few minutes after attach slip through), and the container is inactive whenever the keyguard is not showing.
 The module sources are now compile-checked with javac against android-33 before every push.
+
+## Milestone 0.8: touch handler NPE
+Field report: opening the shade threw `NullPointerException ... NotificationCapsuleContainerTouchHandler.onInterceptTouchEvent` from `NotificationCapsuleContainer.onInterceptTouchEvent`.
+Cause (verified in the smali): `NotificationCapsuleContainer.scroller` is only assigned by `NotificationCapsuleContainerControllerImpl` (Dagger-built in 16.1; it also sets capsuleViewModel, containerControllerImpl, lightOSController, stackY listener). Nothing creates that controller here, so the field stays null.
+Interim fix (tools/make_capsule_dex.py `guard_scroller`): the three container methods that use the handler (`onInterceptTouchEvent`, `onTouchEvent`, `checkIfNeedCancelHScroll`) return early when it is null. Two more callers (`CapsuleDataPinHandler.autoScrollToNext`, `CapsuleViewExpandKtKt`) only run once capsules exist.
+Real fix (next): construct `NotificationCapsuleContainerControllerImpl` ourselves (needs CapsuleViewModel, the Lazy providers, OplusNotificationCapsuleInteractorImpl), which also gives touch handling, data binding and stack coupling.
