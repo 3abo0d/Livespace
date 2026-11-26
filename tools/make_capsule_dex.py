@@ -7,6 +7,8 @@ patched so they run on the 16.0.x SystemUI:
 Usage: make_capsule_dex.py --new SystemUI_16.1.apk --old <device SystemUI.apk> --apktool apktool.jar [--work DIR] [--out capsule.dex]
 Needs: python3, java, ~2 GB free storage. Nothing from the APKs is uploaded anywhere."""
 import argparse, glob, os, re, shutil, struct, subprocess, sys, zipfile, collections
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import make_capsule_res
 
 PK = 'Lcom/oplus/systemui/notification/lockscreen/'
 SHIM = 'Lcom/livespace/shim/Adapters;'
@@ -99,7 +101,7 @@ TOK = re.compile(r'L[A-Za-z0-9_/$]+;')
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--new', required=True); ap.add_argument('--old', required=True); ap.add_argument('--apktool', required=True)
-    ap.add_argument('--work', default='ls_work'); ap.add_argument('--out', default='capsule.dex'); ap.add_argument('--xmx', default='1500m')
+    ap.add_argument('--work', default='ls_work'); ap.add_argument('--res-out', default='capsule_res.apk'); ap.add_argument('--out', default='capsule.dex'); ap.add_argument('--xmx', default='1500m')
     a = ap.parse_args(); W = os.path.abspath(a.work); os.makedirs(W, exist_ok=True)
     for tag, apk in (('old', a.old), ('new', a.new)):
         dd = os.path.join(W, tag); os.makedirs(dd, exist_ok=True)
@@ -159,9 +161,20 @@ def main():
         k = (T, name, proto, kind)
         if k not in stubs: stubs[k] = ('s%d' % len(stubs), sproto, ret)
         return stubs[k][0], stubs[k][1]
+    with zipfile.ZipFile(a.new) as z: RES_IDS = make_capsule_res.arsc_ids(z.read('resources.arsc'))
+    log('16.1 resource ids', len(RES_IDS))
+    CONST = re.compile(r'^(\s*const [vp]\d+, )(0x7f[0-9a-f]{6})\s*$'); ARR = re.compile(r'^(\s+)(0x7f[0-9a-f]{6})\s*$')
+    FINIT = re.compile(r'^(\s*\.field .* = )(0x7f[0-9a-f]{6})\s*$')
+    def remap_id(line):
+        for rx in (CONST, ARR, FINIT):
+            m = rx.match(line)
+            if m and int(m.group(2), 16) in RES_IDS:
+                report['resource ids remapped'] += 1; return m.group(1) + '0x7e' + m.group(2)[4:]
+        return line
     def patch(text):
         out = []; cast = None
         for line in text.split('\n'):
+            line = remap_id(line)
             if cast and re.match(r'\s*move-result-object (\S+)', line):
                 out.append(line); out.append('    check-cast %s, %s' % (re.match(r'\s*move-result-object (\S+)', line).group(1), cast)); cast = None; continue
             m = INV.match(line)
@@ -224,6 +237,8 @@ def main():
         if T in OLD and not has(T, 'm', sig): bad[T.split('/')[-1] + '.' + sig.split('(')[0]] += 1
     for T, sig in fs:
         if T in OLD and not has(T, 'f', sig): bad['field ' + T.split('/')[-1] + '.' + sig] += 1
+    log('building relocated resources apk ...'); st = make_capsule_res.build_res_apk(a.new, a.res_out)
+    log('  ', a.res_out, os.path.getsize(a.res_out), 'bytes;', st)
     log('wrote', a.out, os.path.getsize(a.out), 'bytes; unresolved references left:', len(bad))
     for k, v in sorted(bad.items())[:40]: log('   LEFT', k)
 if __name__ == '__main__': main()

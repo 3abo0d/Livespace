@@ -29,3 +29,7 @@ A scan of the whole capsule closure (935 classes) found 187 member references to
 * redirects every other missing method/static field to default no-op stubs (`ls/Stubs`), so a missing API can never throw NoSuchMethodError inside SystemUI,
 * leaves 3 references that cannot be redirected: `LockscreenNotificationCenterAnimBreakerExImpl.<init>` (lockscreen shade transition, not on the capsule path), and two `invoke-super` calls to a default method of `TransitionAnimator$Controller` (only hit when launching an app from a capsule).
 Stubs return 0/false/null. Behaviour that depended on those APIs (immersive music wallpaper, AOD transitions, drag springs) is inert for now.
+
+## Milestone 0.3: resources
+Log after 0.2: capsule.dex loads, then `Resources$NotFoundException 0x7f0702b5` (16.1 resource ids are hard-coded in the dex and do not exist in the 16.0.x resource table).
+Fix: `tools/make_capsule_res.py` copies the 16.1 `resources.arsc` + `res/**` into `capsule_res.apk` with the package id relocated 0x7f -> 0x7e (arsc entries, bag parents/keys and every binary XML attribute/reference/resource-map are rewritten), and `make_capsule_dex.py` rewrites the matching resource-id constants in the dex. The module adds `capsule_res.apk` to SystemUI's AssetManager before building the container, so the capsule sees its real 16.1 dimens/layouts/drawables while SystemUI keeps its own resources.

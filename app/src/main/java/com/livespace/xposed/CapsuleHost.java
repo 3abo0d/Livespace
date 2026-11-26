@@ -5,7 +5,9 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.content.res.AssetManager;
 import java.io.File;
+import java.lang.reflect.Method;
 import java.io.FileWriter;
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -18,6 +20,7 @@ final class CapsuleHost {
   static final String CONTAINER = "com.oplus.systemui.notification.lockscreen.capsule.NotificationCapsuleContainer";
   static final String TAG = "livespace_capsule";
   private static boolean armed;
+  private static boolean resAdded;
 
   static void attach(ViewGroup panel, ClassLoader host) {
     try {
@@ -25,6 +28,7 @@ final class CapsuleHost {
       if (!guard(panel.getContext(), panel)) return;
       ClassLoader cl = CapsuleLoader.get(host);
       if (cl == null) return;
+      addResources(panel.getContext());
       Class<?> c = cl.loadClass(CONTAINER);
       View v = (View) c.getConstructor(Context.class).newInstance(panel.getContext());
       v.setTag(TAG);
@@ -32,6 +36,20 @@ final class CapsuleHost {
       UdfpsAnchor.install(panel, v);
       Log.i("capsule container attached");
     } catch (Throwable t) { Log.e("attach failed", t); }
+  }
+
+  /** Adds the relocated 16.1 resources (package id 0x7e, built by tools/make_capsule_res.py) to SystemUI's AssetManager. */
+  private static void addResources(Context ctx) {
+    if (resAdded) return;
+    File f = new File(CapsuleLoader.DIR, "capsule_res.apk");
+    if (!f.canRead()) { Log.w("cannot read " + f + " (run scripts/build_capsule_dex.sh)"); return; }
+    try {
+      Method m = AssetManager.class.getDeclaredMethod("addAssetPath", String.class);
+      m.setAccessible(true);
+      Object cookie = m.invoke(ctx.getAssets(), f.getAbsolutePath());
+      resAdded = true;
+      Log.i("resources added, cookie=" + cookie);
+    } catch (Throwable t) { Log.e("addAssetPath failed", t); }
   }
 
   private static boolean guard(Context ctx, View anchor) {

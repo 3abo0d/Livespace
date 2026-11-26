@@ -9,6 +9,6 @@ pkg install -y openjdk-17 python unzip curl
 [ -f "$HOME/apktool.jar" ] || curl -L -o "$HOME/apktool.jar" https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar
 su -c "cp /system_ext/priv-app/SystemUI/SystemUI.apk $HOME/device_systemui.apk && chown $(id -u):$(id -g) $HOME/device_systemui.apk"
 [ -r "$NEW" ] || { echo "cannot read $NEW (run termux-setup-storage or copy it into ~)"; exit 1; }
-python3 "$REPO/tools/make_capsule_dex.py" --new "$NEW" --old "$HOME/device_systemui.apk" --apktool "$HOME/apktool.jar" --work "$HOME/ls_work" --out "$HOME/capsule.dex"
-su -c "mkdir -p /data/local/tmp/livespace && rm -f /data/local/tmp/livespace/*.dex && cp $HOME/capsule.dex /data/local/tmp/livespace/capsule.dex && chmod 755 /data/local/tmp/livespace && chmod 444 /data/local/tmp/livespace/capsule.dex && chcon -R u:object_r:system_file:s0 /data/local/tmp/livespace && ls -lZ /data/local/tmp/livespace"
+python3 "$REPO/tools/make_capsule_dex.py" --new "$NEW" --old "$HOME/device_systemui.apk" --apktool "$HOME/apktool.jar" --work "$HOME/ls_work" --out "$HOME/capsule.dex" --res-out "$HOME/capsule_res.apk"
+su -c "mkdir -p /data/local/tmp/livespace && rm -f /data/local/tmp/livespace/*.dex /data/local/tmp/livespace/*.apk && cp $HOME/capsule.dex $HOME/capsule_res.apk /data/local/tmp/livespace/ && chmod 755 /data/local/tmp/livespace && chmod 444 /data/local/tmp/livespace/capsule.dex /data/local/tmp/livespace/capsule_res.apk && chcon -R u:object_r:system_file:s0 /data/local/tmp/livespace && ls -lZ /data/local/tmp/livespace"
 echo "Done. Restart SystemUI:  su -c 'killall com.android.systemui'   then check LSPosed log for [Livespace]"
