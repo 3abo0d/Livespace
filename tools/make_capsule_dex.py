@@ -15,6 +15,8 @@ SHIM = 'Lcom/livespace/shim/Adapters;'
 STUBS = 'Lls/Stubs;'
 FIELD_DEFAULTS = {'isNotificationCapsuleMetaBallEnable': 'true', 'USE_OPLUS_PHYSICAL': 'true'}
 ENUM_FALLBACK = {'Lcom/oplus/systemui/notification/blur/ViewBlurManager$CardType;': 'NOTIFICATION'}
+RELOC_RX = re.compile(r'ExternalSyntheticOutline|/OplusExpandableView(State)?Ex(Impl)?(\$[^;]*)?;$')
+STUB_CONST = {('Lcom/oplus/systemui/notification/blur/ViewBlurManager;', 'getCurrentMaterialColor'): '0xb8282828'}
 ADAPT_STATIC = {  # (class, name+proto) -> (adapter name, adapter return type or None=same)
  ('Lcom/android/systemui/statusbar/notification/AnimatableProperty;',
   'from(Ljava/lang/String;Ljava/util/function/BiConsumer;Ljava/util/function/Function;III)Lcom/android/systemui/statusbar/notification/AnimatableProperty$6;'): 'animatableFrom'}
@@ -69,9 +71,12 @@ def refs_of(path):
 OBJ_M = {'<init>()V', 'getClass()Ljava/lang/Class;', 'hashCode()I', 'equals(Ljava/lang/Object;)Z', 'toString()Ljava/lang/String;',
          'notify()V', 'notifyAll()V', 'wait()V', 'wait(J)V', 'clone()Ljava/lang/Object;', 'finalize()V'}
 OLD = {}
+FRAMEWORK = ('Landroid/', 'Ljava/', 'Ljavax/', 'Ldalvik/', 'Lkotlin/', 'Lkotlinx/', 'Lcom/android/internal/', 'Llibcore/', 'Lsun/', 'Lorg/', 'Lcom/google/',
+             'Landroidx/', 'Lcom/oplus/os/', 'Lcom/oplus/util/', 'Lcom/oplus/utils/', 'Lcom/oplus/content/', 'Lcom/oplus/app/', 'Lcom/oplus/view/')
+CALLBACKISH = re.compile(r'^(on[A-Z]|dump\()')
 def has(cls, kind, sig, seen=None):
     seen = seen if seen is not None else set()
-    if cls in seen: return True
+    if cls in seen: return False  # already searched this ancestor (diamond/cycle): nothing new here
     seen.add(cls)
     if cls == 'Ljava/lang/Object;': return kind == 'm' and sig in OBJ_M
     e = OLD.get(cls)
@@ -155,21 +160,39 @@ def main():
         return idx.get(desc)
     seed = [c for c in NEWMAP if c.startswith(PK)]
     for dx in sorted(set(NEWMAP[c] for c in seed)): decode(dx)
-    texts = {}; queue = list(seed); reloc = set()
+    texts = {}; queue = list(seed); reloc = set(); mism = set()
     log('computing closure ...')
-    while queue:
-        c = queue.pop()
-        if c in texts: continue
-        p = ensure(c)
-        if not p: log('  no smali for', c); continue
-        t = open(p, errors='ignore').read(); texts[c] = t
-        for m in (INV.match(l) for l in t.split('\n')):
-            if m and m.group(5) in OLD and 'ExternalSyntheticOutline' in m.group(5) and not has(m.group(5), 'm', m.group(6) + m.group(7)):
-                reloc.add(m.group(5))
+    def outer(c): return c.split('$')[0] + ';' if '$' in c else c
+    def scan(c, t):
+        for l in t.split('\n'):
+            m = INV.match(l); k = None
+            if m: T, sig, k = m.group(5), m.group(6) + m.group(7), 'm'
+            else:
+                m = FLD.match(l)
+                if m: T, sig, k = m.group(4), m.group(5) + ':' + m.group(6), 'f'
+            if k and T in OLD and (not has(T, k, sig) or inaccessible(T, k, sig)): mism.add(T)
         for tk in set(TOK.findall(t)):
-            if tk not in OLD and tk in NEWMAP and tk not in texts: queue.append(tk)
-    for r in reloc: ensure(r)
-    log('closure', len(texts), 'classes; relocated helper classes', len(reloc))
+            if tk not in OLD and tk in NEWMAP and tk not in texts and tk not in queue: queue.append(tk)
+    def promote():
+        ch = False
+        for tk in list(set(TOK.findall('\n'.join(texts.values())))) if False else ():
+            pass
+        cand = set()
+        for t in texts.values(): cand.update(TOK.findall(t))
+        for tk in cand:
+            if tk in OLD and tk not in reloc and RELOC_RX.search(tk) and (tk in mism or outer(tk) in reloc):
+                reloc.add(tk); queue.append(tk); ch = True
+        return ch
+    while True:
+        while queue:
+            c = queue.pop()
+            if c in texts: continue
+            p = ensure(c)
+            if not p: log('  no smali for', c); continue
+            t = open(p, errors='ignore').read(); texts[c] = t; scan(c, t)
+        if not promote(): break
+    for r in list(reloc): ensure(r)
+    log('closure', len(texts) - len(reloc), 'classes; relocated host classes', len(reloc)); [log('   reloc', r.split('/')[-1]) for r in sorted(reloc)]
     stubs = collections.OrderedDict(); sfields = collections.OrderedDict(); report = collections.Counter(); needs_cast = None
     def stub_for(kind, T, name, proto):
         ps = split_params(proto); ret = proto[proto.index(')') + 1:]
@@ -231,11 +254,8 @@ def main():
         for r in reloc: t = t.replace(r, 'Lls/o/' + r[1:])
         return t
     for c, t in texts.items():
-        p = os.path.join(B, 'smali', rel(c)); os.makedirs(os.path.dirname(p), exist_ok=True)
+        p = os.path.join(B, 'smali', ('ls/o/' if c in reloc else '') + rel(c)); os.makedirs(os.path.dirname(p), exist_ok=True)
         open(p, 'w').write(subst(patch(t)))
-    for r in reloc:
-        p = os.path.join(B, 'smali', 'ls', 'o', rel(r)); os.makedirs(os.path.dirname(p), exist_ok=True)
-        open(p, 'w').write(subst(open(idx[r], errors='ignore').read()))
     s = ['.class public ' + STUBS[:-1] + ';', '.super Ljava/lang/Object;', '']
     for (name, ty), dv in sfields.items():
         init = ''
@@ -243,7 +263,9 @@ def main():
         elif ty in 'BSCIJFD': init = ' = 0x0'
         s.append('.field public static %s:%s%s' % (name, ty, init))
     for (T, name, proto, kind), (sn, sproto, ret) in stubs.items():
-        s += ['', '.method public static %s%s' % (sn, sproto), '    .locals 2', stub_body(ret), '.end method']
+        body = stub_body(ret)
+        if (T, name.split('(')[0]) in STUB_CONST and ret == 'I': body = '    const v0, %s\n    return v0' % STUB_CONST[(T, name.split('(')[0])]
+        s += ['', '.method public static %s%s' % (sn, sproto), '    .locals 2', body, '.end method']
     p = os.path.join(B, 'smali', 'ls', 'Stubs.smali'); os.makedirs(os.path.dirname(p), exist_ok=True); open(p, 'w').write('\n'.join(s) + '\n')
     log('patch report:'); [log('  ', k, v) for k, v in sorted(report.items())]
     # assemble with apktool: reuse an apktool.yml + manifest from any decoded dir
