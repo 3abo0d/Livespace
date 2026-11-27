@@ -65,3 +65,9 @@ Real fix (next): construct `NotificationCapsuleContainerControllerImpl` ourselve
 ## Milestone 0.9: demo capsule
 Log after 0.8: clean start, `capsule container attached (guarded)`, fingerprint view found (`com.android.keyguard.OplusLockIconView`).
 `DemoCapsule` builds a real `CapsuleItemView` via `CapsuleNotificationData(key, CapsuleNotificationContainerView, color, animAdd)` + `attachCapsuleEntry` + `addContainerView`, with a "Live Space" label, so the capsule is visible before live data exists. Disable with `/data/local/tmp/livespace/nodemo`.
+
+## Milestone 0.10: relocated types vs device members
+Log after 0.9: `NoSuchFieldError: ExpandableView.mExpandableViewEx of type ls/o/...OplusExpandableViewEx` (CapsuleItemView.makeEx).
+Cause: relocation rewrote the declared type inside member references on *device* classes, so the references no longer matched the real field/method descriptors. Now references to members of device (non-relocated) classes keep the device's descriptors; only references to relocated/new classes use the relocated names.
+Also: classes implementing a relocated interface now also implement the device's original interface (CapsuleItemViewExImpl, relocated OplusExpandableViewExImpl/StateExImpl), so device code that reads `mExpandableViewEx` can call them.
+Still left (off the capsule path): `LockscreenNotificationCenterAnimBreakerExImpl.<init>`, `KeyguardStyleClockControllerImpl.isEngineImmersive`.

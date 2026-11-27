@@ -322,9 +322,24 @@ def main():
     def subst(t):
         for r in reloc: t = t.replace(r, 'Lls/o/' + r[1:])
         return t
+    def fin(t):
+        # 1) member references on SystemUI (device) classes keep the device's own descriptors; everything else points at the relocated copies
+        out = []
+        for l in t.split('\n'):
+            m = INV.match(l); T = m.group(5) if m else None
+            if not m:
+                m = FLD.match(l); T = m.group(4) if m else None
+            out.append(l if (T and T in OLD and T not in reloc) else subst(l))
+        t = '\n'.join(out)
+        # 2) a class implementing a relocated interface also implements the device's original interface, so SystemUI code can call it
+        for r in reloc:
+            mark = '.implements Lls/o/' + r[1:]
+            if mark in t and (OLD[r]['acc'] & 0x200) and ('.implements ' + r) not in t:
+                t = t.replace(mark, mark + '\n.implements ' + r, 1); report['also implements device interface ' + r.split('/')[-1]] += 1
+        return t
     for c, t in texts.items():
         p = os.path.join(B, 'smali', ('ls/o/' if c in reloc else '') + rel(c)); os.makedirs(os.path.dirname(p), exist_ok=True)
-        open(p, 'w').write(subst(patch(guard_scroller(c, fix_overrides(c, t)))))
+        open(p, 'w').write(fin(patch(guard_scroller(c, fix_overrides(c, t)))))
     s = ['.class public ' + STUBS[:-1] + ';', '.super Ljava/lang/Object;', '']
     for (name, ty), dv in sfields.items():
         init = ''
