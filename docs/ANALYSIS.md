@@ -83,3 +83,6 @@ Log after 0.11: `capsule resources were missing, re-added: true`, container OK, 
 `getResourceName` passes, `getValue` fails: a string-valued entry (file path) cannot be read while dimens can. aapt2 confirms the relocated table is valid. Suspect: `resources.arsc` was stored but not 4-byte aligned in the zip (zipalign rule), so the global string pool cannot be set up by libandroidfw.
 Fix: arsc is now the first entry with a 4-byte padding extra so its data starts at offset 48. Also: `ensureResources` probes with getValue (not just getResourceName) and `diagnose()` logs name/value results for the layout, the next layout, a dimen and a string when the demo fails.
 Needs: git pull, rebuild dex/res (build_capsule_dex.sh) and reinstall the module.
+
+## Milestone 0.13: every live Resources object
+Probes after the failed demo read all resources fine, so the inflater inside CapsuleItemView used a different Resources object than the panel context that was repaired. ensureResources now adds the package to every live ResourcesImpl (ResourcesManager.mResourceImpls); diagnose() logs which context the inflater uses.

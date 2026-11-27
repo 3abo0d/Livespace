@@ -72,14 +72,44 @@ final class CapsuleHost {
   /** Android rebuilds Resources/AssetManager on configuration or theme changes, which drops paths added at runtime.
    *  Check that the capsule layout still resolves; if not, add the package again. */
   static void ensureResources(Context ctx) {
+    addToAllLive();
     try { ctx.getResources().getValue(PROBE_ID, new android.util.TypedValue(), true); return; } catch (Throwable ignored) { }
     boolean ok = addTo(ctx.getAssets());
     Log.i("capsule resources were missing, re-added: " + ok);
   }
 
+  /** SystemUI has several Resources objects (per context/configuration). The inflater used by capsule code may hold one other than the panel's,
+   *  so add the package to every live ResourcesImpl. Adding an already present path is harmless. */
+  static void addToAllLive() {
+    try {
+      Class<?> rm = Class.forName("android.app.ResourcesManager");
+      Object inst = rm.getMethod("getInstance").invoke(null);
+      java.lang.reflect.Field f = rm.getDeclaredField("mResourceImpls");
+      f.setAccessible(true);
+      int n = 0;
+      synchronized (inst) {
+        java.util.Map<?, ?> map = (java.util.Map<?, ?>) f.get(inst);
+        for (Object ref : new java.util.ArrayList<Object>(map.values())) {
+          Object impl = ((java.lang.ref.Reference<?>) ref).get();
+          if (impl == null) continue;
+          AssetManager am = (AssetManager) impl.getClass().getMethod("getAssets").invoke(impl);
+          if (addTo(am)) n++;
+        }
+      }
+      if (n != lastLive) { lastLive = n; Log.i("capsule resources present in " + n + " live Resources objects"); }
+    } catch (Throwable t) { Log.e("addToAllLive failed", t); }
+  }
+  private static int lastLive = -1;
+
   /** Logs what Android can and cannot read from the capsule resource package (names vs values), to pinpoint resource failures. */
   static void diagnose(Context ctx) {
     android.content.res.Resources r = ctx.getResources();
+    try {
+      Context ic = android.view.LayoutInflater.from(ctx).getContext();
+      Log.i("inflater context=" + ic.getClass().getName() + " sameResources=" + (ic.getResources() == r));
+      ic.getResources().getValue(PROBE_ID, new android.util.TypedValue(), true);
+      Log.i("inflater resources can read the layout");
+    } catch (Throwable t) { Log.i("inflater resources CANNOT read the layout: " + t.getMessage()); }
     int[] ids = { PROBE_ID, PROBE_ID + 1, 0x7e0702b5, 0x7e130001 };
     for (int id : ids) {
       StringBuilder sb = new StringBuilder("probe 0x" + Integer.toHexString(id) + ": ");
