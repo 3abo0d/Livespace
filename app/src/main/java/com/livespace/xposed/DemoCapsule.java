@@ -17,6 +17,7 @@ final class DemoCapsule {
   static void add(Context ctx, ClassLoader cl, View container) {
     try {
       if (new File(CapsuleLoader.DIR, "nodemo").exists()) { Log.i("demo capsule skipped (nodemo file)"); return; }
+      CapsuleHost.ensureResources(ctx);
       Class<?> contentCls = cl.loadClass(P + "notification.CapsuleNotificationContainerView");
       View content = (View) contentCls.getConstructor(Context.class).newInstance(ctx);
       TextView tv = new TextView(ctx);

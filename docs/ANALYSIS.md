@@ -71,3 +71,9 @@ Log after 0.9: `NoSuchFieldError: ExpandableView.mExpandableViewEx of type ls/o/
 Cause: relocation rewrote the declared type inside member references on *device* classes, so the references no longer matched the real field/method descriptors. Now references to members of device (non-relocated) classes keep the device's descriptors; only references to relocated/new classes use the relocated names.
 Also: classes implementing a relocated interface now also implement the device's original interface (CapsuleItemViewExImpl, relocated OplusExpandableViewExImpl/StateExImpl), so device code that reads `mExpandableViewEx` can call them.
 Still left (off the capsule path): `LockscreenNotificationCenterAnimBreakerExImpl.<init>`, `KeyguardStyleClockControllerImpl.isEngineImmersive`.
+
+## Milestone 0.11: resources lost after a few seconds
+Log after 0.10: `Resources$NotFoundException 0x7e0d008d` (layout/capsule_item_view) in CapsuleItemView.<init>, 3 s after the container had resolved its dimens from the same package.
+Checked: the relocated apk is valid (aapt2 dump: same entry counts per type, `layout/capsule_item_view` present, package com.livespace.res id=7e, default config).
+Cause (most likely): Android rebuilds Resources/AssetManager on configuration/theme changes, which drops paths added with `addAssetPath` at runtime.
+Fix: hook `ResourcesManager.createAssetManager` so every new AssetManager in SystemUI gets the package, and `ensureResources()` probes the capsule layout and re-adds the package right before the container and the demo item are built (logs `capsule resources were missing, re-added`).

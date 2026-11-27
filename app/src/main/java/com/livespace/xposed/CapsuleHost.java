@@ -9,6 +9,8 @@ import android.widget.FrameLayout;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
+import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
 import java.lang.reflect.Method;
 
 /** Builds the 16.1 NotificationCapsuleContainer and attaches it (inside a SafeHost) to the keyguard NotificationPanelView.
@@ -21,18 +23,18 @@ final class CapsuleHost {
   private static boolean armed;
   private static boolean tripped;
   private static boolean containerFailed;
-  private static boolean resAdded;
 
   static void attach(ViewGroup panel, ClassLoader host) {
     try {
       if (panel.findViewWithTag(TAG) != null) return;
       if (CapsuleGuard.disabled || !guard(panel.getContext())) return;
       CapsuleGuard.installNet();
+      installResourcesHook();
       if (!containerFailed) {
         try {
           ClassLoader cl = CapsuleLoader.get(host);
           if (cl == null) throw new IllegalStateException("capsule.dex not available");
-          addResources(panel.getContext());
+          ensureResources(panel.getContext());
           Class<?> c = cl.loadClass(CONTAINER);
           View v = (View) c.getConstructor(Context.class).newInstance(panel.getContext());
           SafeHost safe = new SafeHost(panel.getContext(), v);
@@ -53,18 +55,46 @@ final class CapsuleHost {
     } catch (Throwable t) { Log.e("attach failed", t); }
   }
 
-  /** Adds the relocated 16.1 resources (package id 0x7e, built by tools/make_capsule_res.py) to SystemUI's AssetManager. */
-  private static void addResources(Context ctx) {
-    if (resAdded) return;
+  static final int PROBE_ID = 0x7e0d008d;  // layout/capsule_item_view in the relocated resource package
+
+  /** Adds the relocated 16.1 resources (package id 0x7e, built by tools/make_capsule_res.py) to an AssetManager. */
+  static boolean addTo(AssetManager am) {
     File f = new File(CapsuleLoader.DIR, "capsule_res.apk");
-    if (!f.canRead()) { Log.w("cannot read " + f + " (run scripts/build_capsule_dex.sh)"); return; }
+    if (!f.canRead()) { Log.w("cannot read " + f + " (run scripts/build_capsule_dex.sh)"); return false; }
     try {
       Method m = AssetManager.class.getDeclaredMethod("addAssetPath", String.class);
       m.setAccessible(true);
-      Object cookie = m.invoke(ctx.getAssets(), f.getAbsolutePath());
-      resAdded = true;
-      Log.i("resources added, cookie=" + cookie);
-    } catch (Throwable t) { Log.e("addAssetPath failed", t); }
+      Object cookie = m.invoke(am, f.getAbsolutePath());
+      return cookie instanceof Integer && ((Integer) cookie) != 0;
+    } catch (Throwable t) { Log.e("addAssetPath failed", t); return false; }
+  }
+
+  /** Android rebuilds Resources/AssetManager on configuration or theme changes, which drops paths added at runtime.
+   *  Check that the capsule layout still resolves; if not, add the package again. */
+  static void ensureResources(Context ctx) {
+    try { ctx.getResources().getResourceName(PROBE_ID); return; } catch (Throwable ignored) { }
+    boolean ok = addTo(ctx.getAssets());
+    Log.i("capsule resources were missing, re-added: " + ok);
+  }
+
+  /** Add the package to every AssetManager Android creates from now on (SystemUI process only). */
+  private static boolean hookInstalled;
+  static synchronized void installResourcesHook() {
+    if (hookInstalled) return;
+    hookInstalled = true;
+    try {
+      Class<?> rm = Class.forName("android.app.ResourcesManager");
+      XposedBridge.hookAllMethods(rm, "createAssetManager", new XC_MethodHook() {
+        @Override protected void afterHookedMethod(MethodHookParam p) {
+          try {
+            if (CapsuleGuard.disabled) return;
+            Object r = p.getResult();
+            if (r instanceof AssetManager) addTo((AssetManager) r);
+          } catch (Throwable ignored) { }
+        }
+      });
+      Log.i("resources hook installed");
+    } catch (Throwable t) { Log.e("resources hook failed", t); }
   }
 
   private static boolean guard(Context ctx) {
