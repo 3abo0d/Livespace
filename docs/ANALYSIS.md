@@ -77,3 +77,9 @@ Log after 0.10: `Resources$NotFoundException 0x7e0d008d` (layout/capsule_item_vi
 Checked: the relocated apk is valid (aapt2 dump: same entry counts per type, `layout/capsule_item_view` present, package com.livespace.res id=7e, default config).
 Cause (most likely): Android rebuilds Resources/AssetManager on configuration/theme changes, which drops paths added with `addAssetPath` at runtime.
 Fix: hook `ResourcesManager.createAssetManager` so every new AssetManager in SystemUI gets the package, and `ensureResources()` probes the capsule layout and re-adds the package right before the container and the demo item are built (logs `capsule resources were missing, re-added`).
+
+## Milestone 0.12: layout value cannot be read
+Log after 0.11: `capsule resources were missing, re-added: true`, container OK, then demo fails: `ResourcesImpl.getValue` -> `NotFoundException 0x7e0d008d` (layout/capsule_item_view) from `LayoutInflater.inflate`.
+`getResourceName` passes, `getValue` fails: a string-valued entry (file path) cannot be read while dimens can. aapt2 confirms the relocated table is valid. Suspect: `resources.arsc` was stored but not 4-byte aligned in the zip (zipalign rule), so the global string pool cannot be set up by libandroidfw.
+Fix: arsc is now the first entry with a 4-byte padding extra so its data starts at offset 48. Also: `ensureResources` probes with getValue (not just getResourceName) and `diagnose()` logs name/value results for the layout, the next layout, a dimen and a string when the demo fails.
+Needs: git pull, rebuild dex/res (build_capsule_dex.sh) and reinstall the module.

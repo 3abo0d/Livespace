@@ -94,7 +94,10 @@ def build_res_apk(src_apk, out_apk):
     stats = {'refs': 0, 'pkgs': 0, 'xml': 0, 'files': 0}
     with zipfile.ZipFile(src_apk) as z, zipfile.ZipFile(out_apk, 'w') as o:
         arsc, st = relocate_arsc(z.read('resources.arsc')); stats['refs'] += st['refs']; stats['pkgs'] = st['pkgs']
-        o.writestr(zipfile.ZipInfo('resources.arsc'), arsc, compress_type=zipfile.ZIP_STORED)
+        # resources.arsc is stored uncompressed and must start on a 4-byte boundary (what zipalign does): first entry, 30 + 14 + 4 = 48
+        zi = zipfile.ZipInfo('resources.arsc'); zi.compress_type = zipfile.ZIP_STORED
+        zi.extra = struct.pack('<HH', 0xD935, 0)
+        o.writestr(zi, arsc)
         for n in z.namelist():
             if not n.startswith('res/') or n.endswith('/'): continue
             data = z.read(n)

@@ -72,9 +72,22 @@ final class CapsuleHost {
   /** Android rebuilds Resources/AssetManager on configuration or theme changes, which drops paths added at runtime.
    *  Check that the capsule layout still resolves; if not, add the package again. */
   static void ensureResources(Context ctx) {
-    try { ctx.getResources().getResourceName(PROBE_ID); return; } catch (Throwable ignored) { }
+    try { ctx.getResources().getValue(PROBE_ID, new android.util.TypedValue(), true); return; } catch (Throwable ignored) { }
     boolean ok = addTo(ctx.getAssets());
     Log.i("capsule resources were missing, re-added: " + ok);
+  }
+
+  /** Logs what Android can and cannot read from the capsule resource package (names vs values), to pinpoint resource failures. */
+  static void diagnose(Context ctx) {
+    android.content.res.Resources r = ctx.getResources();
+    int[] ids = { PROBE_ID, PROBE_ID + 1, 0x7e0702b5, 0x7e130001 };
+    for (int id : ids) {
+      StringBuilder sb = new StringBuilder("probe 0x" + Integer.toHexString(id) + ": ");
+      try { sb.append("name=").append(r.getResourceName(id)); } catch (Throwable t) { sb.append("name FAIL"); }
+      try { android.util.TypedValue tv = new android.util.TypedValue(); r.getValue(id, tv, true); sb.append(" | value type=").append(tv.type).append(" str=").append(tv.string); }
+      catch (Throwable t) { sb.append(" | value FAIL ").append(t.getMessage()); }
+      Log.i(sb.toString());
+    }
   }
 
   /** Add the package to every AssetManager Android creates from now on (SystemUI process only). */

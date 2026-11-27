@@ -37,6 +37,6 @@ final class DemoCapsule {
       attach.invoke(item, data, "demo");
       container.getClass().getMethod("addContainerView", View.class).invoke(container, item);
       Log.i("demo capsule added");
-    } catch (Throwable t) { Log.e("demo capsule failed", t); }
+    } catch (Throwable t) { Log.e("demo capsule failed", t); CapsuleHost.diagnose(ctx); }
   }
 }
